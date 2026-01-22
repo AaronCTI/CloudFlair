@@ -92,20 +92,23 @@ def get_certificates(domain, api_token, pages=2, org_id=None) -> set:
         # Search for certificates with pagination
         while page_num <= pages:
             try:
-                # POST request to search endpoint
+                # POST request to search endpoint with query parameters
                 search_url = f"{API_BASE_URL}/search/query"
-                payload = {
-                    'q': certificate_query,
+                params = {
                     'asset_type': 'certificate',
                     'per_page': 100,
                     'page': page_num
                 }
-                
+                payload = {
+                    'query': certificate_query
+                }
+
                 _log_debug(f"Request URL: {search_url}")
+                _log_debug(f"Request params: {json.dumps(params, indent=2)}")
                 _log_debug(f"Request payload: {json.dumps(payload, indent=2)}")
                 _log_debug(f"Request headers: {json.dumps({k: v if k != 'Authorization' else 'Bearer ***' for k, v in headers.items()}, indent=2)}")
-                
-                response = requests.post(search_url, json=payload, headers=headers, timeout=30)
+
+                response = requests.post(search_url, params=params, json=payload, headers=headers, timeout=30)
                 
                 _log_debug(f"Response status: {response.status_code}")
                 _log_debug(f"Response headers: {dict(response.headers)}")
@@ -287,20 +290,23 @@ def get_hosts(cert_fingerprints, api_token, org_id=None):
         # Search for hosts - continue until no more results
         while True:
             try:
-                # POST request to search endpoint
+                # POST request to search endpoint with query parameters
                 search_url = f"{API_BASE_URL}/search/query"
-                payload = {
-                    'q': hosts_query,
+                params = {
                     'asset_type': 'host',
                     'per_page': 100,
                     'page': page_num
                 }
-                
+                payload = {
+                    'query': hosts_query
+                }
+
                 _log_debug(f"Request URL: {search_url}")
+                _log_debug(f"Request params: {json.dumps(params, indent=2)}")
                 _log_debug(f"Request payload: {json.dumps(payload, indent=2)}")
                 _log_debug(f"Request headers: {json.dumps({k: v if k != 'Authorization' else 'Bearer ***' for k, v in headers.items()}, indent=2)}")
-                
-                response = requests.post(search_url, json=payload, headers=headers, timeout=30)
+
+                response = requests.post(search_url, params=params, json=payload, headers=headers, timeout=30)
                 
                 _log_debug(f"Response status: {response.status_code}")
                 _log_debug(f"Response headers: {dict(response.headers)}")
