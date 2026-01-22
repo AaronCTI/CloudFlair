@@ -1,11 +1,58 @@
 import sys
 import requests
+import json
+import os
 
 INVALID_CREDS = "[-] Your Censys credentials look invalid.\n"
 RATE_LIMIT = "[-] Looks like you exceeded your Censys account limits rate. Exiting\n"
 
 # Censys Platform API base URL
 API_BASE_URL = "https://api.platform.censys.io/v3/global"
+
+# Enable debug mode via environment variable
+DEBUG = os.environ.get('CENSYS_DEBUG', '').lower() in ('1', 'true', 'yes')
+
+
+def _log_debug(message):
+    """Log debug message if debug mode is enabled."""
+    if DEBUG:
+        sys.stderr.write(f"[DEBUG] {message}\n")
+
+
+def _handle_api_error(response, context=""):
+    """
+    Handle API errors with detailed error messages.
+    
+    Args:
+        response: requests.Response object
+        context: Additional context string for error message
+    """
+    try:
+        error_data = response.json()
+        error_message = error_data.get('message', 'Unknown error')
+        error_details = error_data.get('errors', {})
+        
+        error_msg = f"[-] API Error (HTTP {response.status_code})"
+        if context:
+            error_msg += f" {context}"
+        error_msg += f": {error_message}\n"
+        
+        if error_details:
+            error_msg += f"[-] Details: {json.dumps(error_details, indent=2)}\n"
+        
+        sys.stderr.write(error_msg)
+        
+        # Log full response for debugging
+        _log_debug(f"Full error response: {json.dumps(error_data, indent=2)}")
+        
+    except (ValueError, KeyError):
+        # If we can't parse JSON, show raw response
+        error_msg = f"[-] API Error (HTTP {response.status_code})"
+        if context:
+            error_msg += f" {context}"
+        error_msg += f": {response.text[:500]}\n"
+        sys.stderr.write(error_msg)
+        _log_debug(f"Raw error response: {response.text}")
 
 
 def get_certificates(domain, api_token, pages=2) -> set:
@@ -33,6 +80,9 @@ def get_certificates(domain, api_token, pages=2) -> set:
             'Content-Type': 'application/json'
         }
         
+        _log_debug(f"Searching for certificates matching domain: {domain}")
+        _log_debug(f"Query: {certificate_query}")
+        
         # Search for certificates with pagination
         while page_num <= pages:
             try:
@@ -45,33 +95,67 @@ def get_certificates(domain, api_token, pages=2) -> set:
                     'page': page_num
                 }
                 
+                _log_debug(f"Request URL: {search_url}")
+                _log_debug(f"Request payload: {json.dumps(payload, indent=2)}")
+                _log_debug(f"Request headers: {json.dumps({k: v if k != 'Authorization' else 'Bearer ***' for k, v in headers.items()}, indent=2)}")
+                
                 response = requests.post(search_url, json=payload, headers=headers, timeout=30)
                 
-                # Handle HTTP errors
+                _log_debug(f"Response status: {response.status_code}")
+                _log_debug(f"Response headers: {dict(response.headers)}")
+                
+                # Handle HTTP errors comprehensively
                 if response.status_code == 401:
                     sys.stderr.write(INVALID_CREDS)
-                    exit(1)
-                elif response.status_code == 429:
-                    sys.stderr.write(RATE_LIMIT)
+                    _handle_api_error(response, "Authentication failed")
                     exit(1)
                 elif response.status_code == 403:
                     sys.stderr.write("[-] You don't have permission to access this data. Please check your API Access role.\n")
+                    _handle_api_error(response, "Permission denied")
+                    exit(1)
+                elif response.status_code == 422:
+                    sys.stderr.write("[-] Invalid request parameters. This might be a query syntax error.\n")
+                    _handle_api_error(response, "Validation error")
+                    _log_debug(f"Query that failed: {certificate_query}")
+                    exit(1)
+                elif response.status_code == 429:
+                    sys.stderr.write(RATE_LIMIT)
+                    _handle_api_error(response, "Rate limit exceeded")
                     exit(1)
                 elif not response.ok:
+                    _handle_api_error(response, f"Request failed on page {page_num}")
                     response.raise_for_status()
                 
-                data = response.json()
+                # Parse response
+                try:
+                    data = response.json()
+                    _log_debug(f"Response data keys: {list(data.keys())}")
+                except ValueError as e:
+                    sys.stderr.write(f"[-] Failed to parse JSON response: {e}\n")
+                    sys.stderr.write(f"[-] Response text: {response.text[:500]}\n")
+                    raise
                 
                 # Extract results from response
                 # Response structure: {"result": {"hits": [...], "total": N, ...}}
-                if 'result' in data and 'hits' in data['result']:
-                    items = data['result']['hits']
+                items = []
+                if 'result' in data:
+                    if isinstance(data['result'], dict) and 'hits' in data['result']:
+                        items = data['result']['hits']
+                    elif isinstance(data['result'], list):
+                        items = data['result']
                 elif 'hits' in data:
                     items = data['hits']
-                else:
-                    items = []
+                elif 'data' in data:
+                    # Alternative response structure
+                    if isinstance(data['data'], list):
+                        items = data['data']
+                    elif isinstance(data['data'], dict) and 'hits' in data['data']:
+                        items = data['data']['hits']
+                
+                _log_debug(f"Found {len(items)} items on page {page_num}")
                 
                 if not items:
+                    _log_debug("No more items found, stopping pagination")
                     break
                 
                 # Extract fingerprints from results
@@ -79,13 +163,36 @@ def get_certificates(domain, api_token, pages=2) -> set:
                     # Try different possible field names for fingerprint
                     fingerprint = None
                     if isinstance(cert, dict):
-                        fingerprint = cert.get('fingerprint_sha256') or cert.get('fingerprint') or cert.get('sha256')
+                        # Check common fingerprint field names
+                        fingerprint = (cert.get('fingerprint_sha256') or 
+                                      cert.get('fingerprint') or 
+                                      cert.get('sha256') or
+                                      cert.get('id'))
+                        # Also check nested structures
+                        if not fingerprint and 'fingerprint' in cert:
+                            fp_obj = cert['fingerprint']
+                            if isinstance(fp_obj, dict):
+                                fingerprint = fp_obj.get('sha256') or fp_obj.get('sha256_fingerprint')
                     
                     if fingerprint:
                         fingerprints.add(fingerprint)
+                    else:
+                        _log_debug(f"Warning: Could not extract fingerprint from cert: {list(cert.keys()) if isinstance(cert, dict) else type(cert)}")
+                
+                _log_debug(f"Total fingerprints collected so far: {len(fingerprints)}")
                 
                 # Check if there are more pages
+                total = None
+                if 'result' in data and isinstance(data['result'], dict):
+                    total = data['result'].get('total')
+                elif 'total' in data:
+                    total = data['total']
+                
+                if total is not None:
+                    _log_debug(f"Total results available: {total}")
+                
                 if len(items) < 100:
+                    _log_debug("Less than 100 items returned, no more pages")
                     break
                     
                 page_num += 1
@@ -94,16 +201,31 @@ def get_certificates(domain, api_token, pages=2) -> set:
                 if hasattr(e, 'response') and e.response is not None:
                     if e.response.status_code == 401:
                         sys.stderr.write(INVALID_CREDS)
+                        _handle_api_error(e.response, "Authentication failed")
+                        exit(1)
+                    elif e.response.status_code == 403:
+                        sys.stderr.write("[-] You don't have permission to access this data. Please check your API Access role.\n")
+                        _handle_api_error(e.response, "Permission denied")
+                        exit(1)
+                    elif e.response.status_code == 422:
+                        sys.stderr.write("[-] Invalid request parameters. This might be a query syntax error.\n")
+                        _handle_api_error(e.response, "Validation error")
                         exit(1)
                     elif e.response.status_code == 429:
                         sys.stderr.write(RATE_LIMIT)
+                        _handle_api_error(e.response, "Rate limit exceeded")
                         exit(1)
+                    else:
+                        _handle_api_error(e.response, f"Request exception on page {page_num}")
+                
                 # If it's the first page and we get an error, re-raise
                 if page_num == 1:
                     raise
                 # Otherwise, we've gotten some results, so break
+                _log_debug(f"Error on page {page_num}, but we have {len(fingerprints)} fingerprints already")
                 break
         
+        _log_debug(f"Final fingerprint count: {len(fingerprints)}")
         return fingerprints
         
     except Exception as e:
@@ -116,7 +238,8 @@ def get_certificates(domain, api_token, pages=2) -> set:
             sys.stderr.write(RATE_LIMIT)
             exit(1)
         else:
-            # Re-raise unknown errors
+            # Re-raise unknown errors with context
+            sys.stderr.write(f"[-] Unexpected error: {type(e).__name__}: {e}\n")
             raise
 
 
@@ -146,6 +269,9 @@ def get_hosts(cert_fingerprints, api_token):
             'Content-Type': 'application/json'
         }
         
+        _log_debug(f"Searching for hosts with {len(cert_fingerprints)} certificate fingerprints")
+        _log_debug(f"Query: {hosts_query}")
+        
         # Search for hosts - continue until no more results
         while True:
             try:
@@ -158,33 +284,67 @@ def get_hosts(cert_fingerprints, api_token):
                     'page': page_num
                 }
                 
+                _log_debug(f"Request URL: {search_url}")
+                _log_debug(f"Request payload: {json.dumps(payload, indent=2)}")
+                _log_debug(f"Request headers: {json.dumps({k: v if k != 'Authorization' else 'Bearer ***' for k, v in headers.items()}, indent=2)}")
+                
                 response = requests.post(search_url, json=payload, headers=headers, timeout=30)
                 
-                # Handle HTTP errors
+                _log_debug(f"Response status: {response.status_code}")
+                _log_debug(f"Response headers: {dict(response.headers)}")
+                
+                # Handle HTTP errors comprehensively
                 if response.status_code == 401:
                     sys.stderr.write(INVALID_CREDS)
-                    exit(1)
-                elif response.status_code == 429:
-                    sys.stderr.write(RATE_LIMIT)
+                    _handle_api_error(response, "Authentication failed")
                     exit(1)
                 elif response.status_code == 403:
                     sys.stderr.write("[-] You don't have permission to access this data. Please check your API Access role.\n")
+                    _handle_api_error(response, "Permission denied")
+                    exit(1)
+                elif response.status_code == 422:
+                    sys.stderr.write("[-] Invalid request parameters. This might be a query syntax error.\n")
+                    _handle_api_error(response, "Validation error")
+                    _log_debug(f"Query that failed: {hosts_query}")
+                    exit(1)
+                elif response.status_code == 429:
+                    sys.stderr.write(RATE_LIMIT)
+                    _handle_api_error(response, "Rate limit exceeded")
                     exit(1)
                 elif not response.ok:
+                    _handle_api_error(response, f"Request failed on page {page_num}")
                     response.raise_for_status()
                 
-                data = response.json()
+                # Parse response
+                try:
+                    data = response.json()
+                    _log_debug(f"Response data keys: {list(data.keys())}")
+                except ValueError as e:
+                    sys.stderr.write(f"[-] Failed to parse JSON response: {e}\n")
+                    sys.stderr.write(f"[-] Response text: {response.text[:500]}\n")
+                    raise
                 
                 # Extract results from response
                 # Response structure: {"result": {"hits": [...], "total": N, ...}}
-                if 'result' in data and 'hits' in data['result']:
-                    items = data['result']['hits']
+                items = []
+                if 'result' in data:
+                    if isinstance(data['result'], dict) and 'hits' in data['result']:
+                        items = data['result']['hits']
+                    elif isinstance(data['result'], list):
+                        items = data['result']
                 elif 'hits' in data:
                     items = data['hits']
-                else:
-                    items = []
+                elif 'data' in data:
+                    # Alternative response structure
+                    if isinstance(data['data'], list):
+                        items = data['data']
+                    elif isinstance(data['data'], dict) and 'hits' in data['data']:
+                        items = data['data']['hits']
+                
+                _log_debug(f"Found {len(items)} items on page {page_num}")
                 
                 if not items:
+                    _log_debug("No more items found, stopping pagination")
                     break
                 
                 # Extract IP addresses from results
@@ -192,17 +352,36 @@ def get_hosts(cert_fingerprints, api_token):
                     # Try different possible field names for IP
                     ip = None
                     if isinstance(host, dict):
-                        ip = host.get('ip') or host.get('ipv4') or host.get('address')
+                        # Check common IP field names
+                        ip = (host.get('ip') or 
+                             host.get('ipv4') or 
+                             host.get('address') or
+                             host.get('id'))
                         # Also check nested structures
-                        if not ip and 'services' in host:
-                            # Some responses might have IP at top level
-                            ip = host.get('ip')
+                        if not ip and 'ip' in host:
+                            ip_obj = host['ip']
+                            if isinstance(ip_obj, dict):
+                                ip = ip_obj.get('ipv4') or ip_obj.get('address')
                     
                     if ip:
                         hosts.add(ip)
+                    else:
+                        _log_debug(f"Warning: Could not extract IP from host: {list(host.keys()) if isinstance(host, dict) else type(host)}")
+                
+                _log_debug(f"Total hosts collected so far: {len(hosts)}")
                 
                 # Check if there are more pages
+                total = None
+                if 'result' in data and isinstance(data['result'], dict):
+                    total = data['result'].get('total')
+                elif 'total' in data:
+                    total = data['total']
+                
+                if total is not None:
+                    _log_debug(f"Total results available: {total}")
+                
                 if len(items) < 100:
+                    _log_debug("Less than 100 items returned, no more pages")
                     break
                     
                 page_num += 1
@@ -211,16 +390,31 @@ def get_hosts(cert_fingerprints, api_token):
                 if hasattr(e, 'response') and e.response is not None:
                     if e.response.status_code == 401:
                         sys.stderr.write(INVALID_CREDS)
+                        _handle_api_error(e.response, "Authentication failed")
+                        exit(1)
+                    elif e.response.status_code == 403:
+                        sys.stderr.write("[-] You don't have permission to access this data. Please check your API Access role.\n")
+                        _handle_api_error(e.response, "Permission denied")
+                        exit(1)
+                    elif e.response.status_code == 422:
+                        sys.stderr.write("[-] Invalid request parameters. This might be a query syntax error.\n")
+                        _handle_api_error(e.response, "Validation error")
                         exit(1)
                     elif e.response.status_code == 429:
                         sys.stderr.write(RATE_LIMIT)
+                        _handle_api_error(e.response, "Rate limit exceeded")
                         exit(1)
+                    else:
+                        _handle_api_error(e.response, f"Request exception on page {page_num}")
+                
                 # If it's the first page and we get an error, re-raise
                 if page_num == 1:
                     raise
                 # Otherwise, we've gotten some results, so break
+                _log_debug(f"Error on page {page_num}, but we have {len(hosts)} hosts already")
                 break
         
+        _log_debug(f"Final host count: {len(hosts)}")
         return hosts
         
     except Exception as e:
@@ -233,5 +427,6 @@ def get_hosts(cert_fingerprints, api_token):
             sys.stderr.write(RATE_LIMIT)
             exit(1)
         else:
-            # Re-raise unknown errors
+            # Re-raise unknown errors with context
+            sys.stderr.write(f"[-] Unexpected error: {type(e).__name__}: {e}\n")
             raise
