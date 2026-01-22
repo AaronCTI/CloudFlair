@@ -41,7 +41,7 @@ def filter_cloudfront_ips(ips):
     return [ ip for ip in ips if not cloudfront_utils.is_cloudfront_ip(ip) ]
 
 
-def find_hosts(domain, censys_pat, use_cloudfront):
+def find_hosts(domain, censys_pat, censys_org_id, use_cloudfront):
     if not dns_utils.is_valid_domain(domain):
         sys.stderr.write('[-] The domain "%s" looks invalid.\n' % domain)
         exit(1)
@@ -61,7 +61,7 @@ def find_hosts(domain, censys_pat, use_cloudfront):
         print('[*] The target appears to be behind CloudFront.')
 
     print('[*] Looking for certificates matching "%s" using Censys' % domain)
-    cert_fingerprints = censys_search.get_certificates(domain, censys_pat)
+    cert_fingerprints = censys_search.get_certificates(domain, censys_pat, org_id=censys_org_id)
     cert_fingerprints = list(cert_fingerprints)
     cert_fingerprints_count = len(cert_fingerprints)
     print('[*] %d certificates matching "%s" found.' % (cert_fingerprints_count, domain))
@@ -79,7 +79,7 @@ def find_hosts(domain, censys_pat, use_cloudfront):
     for i in range(0, cert_fingerprints_count, CERT_CHUNK_SIZE):
         if chunking:
             print('[*] Processing chunk %d/%d' % (i/CERT_CHUNK_SIZE + 1, cert_fingerprints_count/CERT_CHUNK_SIZE))
-        hosts.update(censys_search.get_hosts(cert_fingerprints[i:i+CERT_CHUNK_SIZE], censys_pat))
+        hosts.update(censys_search.get_hosts(cert_fingerprints[i:i+CERT_CHUNK_SIZE], censys_pat, org_id=censys_org_id))
 
     hosts = filter_cloudflare_ips(hosts) if not use_cloudfront else filter_cloudfront_ips(hosts)
     print('[*] %d IPv4 hosts presenting a certificate issued to "%s" were found.' % (len(hosts), domain))
@@ -178,8 +178,8 @@ def find_origins(domain, candidates):
     return origins
 
 
-def main(domain, output_file, censys_pat, use_cloudfront):
-    hosts = find_hosts(domain, censys_pat, use_cloudfront)
+def main(domain, output_file, censys_pat, censys_org_id, use_cloudfront):
+    hosts = find_hosts(domain, censys_pat, censys_org_id, use_cloudfront)
     print_hosts(hosts)
     origins = find_origins(domain, hosts)
 
@@ -196,15 +196,27 @@ if __name__ == "__main__":
     args = cli.parser.parse_args()
 
     censys_pat = None
+    censys_org_id = None
 
     if 'CENSYS_PAT' in os.environ:
         censys_pat = os.environ['CENSYS_PAT']
 
+    if 'CENSYS_ORG_ID' in os.environ:
+        censys_org_id = os.environ['CENSYS_ORG_ID']
+
     if args.censys_pat:
         censys_pat = args.censys_pat
+
+    if args.censys_org_id:
+        censys_org_id = args.censys_org_id
 
     if censys_pat is None:
         sys.stderr.write('[!] Please set your Censys Personal Access Token from your environment (CENSYS_PAT) or from the command line (--censys-pat).\n')
         exit(1)
+
+    if censys_org_id is None:
+        sys.stderr.write('[!] Please set your Censys Organization ID from your environment (CENSYS_ORG_ID) or from the command line (--censys-org-id).\n')
+        sys.stderr.write('[!] Find your Organization ID at https://platform.censys.io - it appears in the URL after "org=".\n')
+        exit(1)
     
-    main(args.domain, args.output_file, censys_pat, args.use_cloudfront)
+    main(args.domain, args.output_file, censys_pat, censys_org_id, args.use_cloudfront)

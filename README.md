@@ -1,6 +1,6 @@
 # CloudFlair
 
-**Important note: As of late 2024, Censys does not provide API access to free accounts anymore. This means CloudFlair does not work with free Censys accounts anymore**.
+**Important note: CloudFlair requires a paid Censys account (Starter or Enterprise) with API credits. Free Censys accounts do not have access to the search API endpoints required by this tool.**
 
 CloudFlair is a tool to find origin servers of websites protected by CloudFlare (or CloudFront) which are publicly exposed and don't appropriately restrict network access to the relevant CDN IP ranges.
 
@@ -54,25 +54,34 @@ $ python cloudflair.py myvulnerable.site
 
 ## Setup
 
-1. Register an account on <https://platform.censys.io/register>
+1. Register an account on <https://platform.censys.io/register> and purchase API credits (Starter or Enterprise plan required)
+
 2. Create a Personal Access Token (PAT) in your [Censys Platform account](https://platform.censys.io/account/api):
    - Go to Account Management > Personal Access Tokens
    - Click "Create New Token"
    - Copy your token and set it as an environment variable
 
+3. Find your Organization ID:
+   - Go to the [Censys Platform console](https://platform.censys.io)
+   - Your Organization ID appears in the URL after `org=` (e.g., `org=12345678-91011-1213`)
+   - Set it as an environment variable
+
 ```bash
 $ export CENSYS_PAT=your-personal-access-token
+$ export CENSYS_ORG_ID=your-organization-id
 ```
 
-**Note:** Starter and Enterprise users need the API Access role to use the API. Free users have limited access to lookup endpoints only.
+**Note:** Starter and Enterprise users need both:
+- The **API Access role** assigned to their account
+- Their **Organization ID** included in API requests (without it, requests are treated as free-tier)
 
-3. Clone the repository
+4. Clone the repository
 
 ```bash
 $ git clone https://github.com/christophetd/CloudFlair.git
 ```
 
-4. Create a virtual env and install the dependencies
+5. Create a virtual env and install the dependencies
 
 ```bash
 cd CloudFlair
@@ -81,7 +90,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-5. Run CloudFlair (see [Usage](#usage) below for more detail)
+6. Run CloudFlair (see [Usage](#usage) below for more detail)
 
 ```bash
 python cloudflair.py myvulnerable.site
@@ -97,7 +106,7 @@ python cloudflair.py myvulnerable.site --cloudfront
 ```bash
 $ python cloudflair.py --help
 
-usage: cloudflair.py [-h] [-o OUTPUT_FILE] [--censys-pat CENSYS_PAT] [--cloudfront] domain
+usage: cloudflair.py [-h] [-o OUTPUT_FILE] [--censys-pat CENSYS_PAT] [--censys-org-id CENSYS_ORG_ID] [--cloudfront] domain
 
 positional arguments:
   domain                The domain to scan
@@ -108,6 +117,8 @@ options:
                         A file to output likely origin servers to (default: None)
   --censys-pat CENSYS_PAT
                         Censys Personal Access Token. Can also be defined using the CENSYS_PAT environment variable (default: None)
+  --censys-org-id CENSYS_ORG_ID
+                        Censys Organization ID (required for Starter/Enterprise accounts). Can also be defined using the CENSYS_ORG_ID environment variable (default: None)
   --cloudfront          Check Cloudfront instead of CloudFlare. (default: False)
 ```
 
@@ -116,17 +127,29 @@ options:
 A lightweight Docker image of CloudFlair ([`christophetd/cloudflair`](https://hub.docker.com/r/christophetd/cloudflair/)) is provided. A scan can easily be instantiated using the following command.
 
 ```bash
-$ docker run --rm -e CENSYS_PAT=your-personal-access-token christophetd/cloudflair myvulnerable.site
+$ docker run --rm -e CENSYS_PAT=your-personal-access-token -e CENSYS_ORG_ID=your-organization-id christophetd/cloudflair myvulnerable.site
 ```
 
-You can also create a file containing the definition of the environment variable, and use the Docker`--env-file` option.
+You can also create a file containing the definition of the environment variables, and use the Docker `--env-file` option.
 
 ```bash
 $ cat censys.env
 CENSYS_PAT=your-personal-access-token
+CENSYS_ORG_ID=your-organization-id
 
 $ docker run --rm --env-file=censys.env christophetd/cloudflair myvulnerable.site
 ```
+
+## Debugging
+
+If you encounter issues with the API, you can enable debug mode to see detailed request/response information:
+
+```bash
+$ export CENSYS_DEBUG=1
+$ python cloudflair.py myvulnerable.site
+```
+
+This will show the full API requests and responses to help diagnose issues.
 
 ## Compatibility
 

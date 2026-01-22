@@ -55,7 +55,7 @@ def _handle_api_error(response, context=""):
         _log_debug(f"Raw error response: {response.text}")
 
 
-def get_certificates(domain, api_token, pages=2) -> set:
+def get_certificates(domain, api_token, pages=2, org_id=None) -> set:
     """
     Search for certificates matching the given domain using Censys Platform API.
     
@@ -63,6 +63,7 @@ def get_certificates(domain, api_token, pages=2) -> set:
         domain: Domain name to search for
         api_token: Censys Personal Access Token
         pages: Number of pages to retrieve (default: 2)
+        org_id: Censys Organization ID (required for Starter/Enterprise accounts)
     
     Returns:
         Set of certificate SHA256 fingerprints
@@ -79,6 +80,11 @@ def get_certificates(domain, api_token, pages=2) -> set:
             'Accept': 'application/vnd.censys.api.v3.certificate.v1+json',
             'Content-Type': 'application/json'
         }
+        
+        # Add Organization ID header for Starter/Enterprise accounts
+        if org_id:
+            headers['X-Organization-ID'] = org_id
+            _log_debug(f"Using Organization ID: {org_id}")
         
         _log_debug(f"Searching for certificates matching domain: {domain}")
         _log_debug(f"Query: {certificate_query}")
@@ -243,13 +249,14 @@ def get_certificates(domain, api_token, pages=2) -> set:
             raise
 
 
-def get_hosts(cert_fingerprints, api_token):
+def get_hosts(cert_fingerprints, api_token, org_id=None):
     """
     Search for hosts presenting certificates with the given fingerprints using Censys Platform API.
     
     Args:
         cert_fingerprints: List of certificate SHA256 fingerprints
         api_token: Censys Personal Access Token
+        org_id: Censys Organization ID (required for Starter/Enterprise accounts)
     
     Returns:
         Set of IPv4 addresses
@@ -268,6 +275,11 @@ def get_hosts(cert_fingerprints, api_token):
             'Accept': 'application/vnd.censys.api.v3.host.v1+json',
             'Content-Type': 'application/json'
         }
+        
+        # Add Organization ID header for Starter/Enterprise accounts
+        if org_id:
+            headers['X-Organization-ID'] = org_id
+            _log_debug(f"Using Organization ID: {org_id}")
         
         _log_debug(f"Searching for hosts with {len(cert_fingerprints)} certificate fingerprints")
         _log_debug(f"Query: {hosts_query}")

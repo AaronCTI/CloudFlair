@@ -20,6 +20,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    '--censys-org-id',
+    help = 'Censys Organization ID (required for Starter/Enterprise accounts). Can also be defined using the CENSYS_ORG_ID environment variable',
+    dest = 'censys_org_id'
+)
+
+parser.add_argument(
     '--cloudfront',
     help = 'Check Cloudfront instead of CloudFlare.',
     dest = 'use_cloudfront',
