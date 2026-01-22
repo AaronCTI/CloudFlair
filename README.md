@@ -4,7 +4,7 @@
 
 CloudFlair is a tool to find origin servers of websites protected by CloudFlare (or CloudFront) which are publicly exposed and don't appropriately restrict network access to the relevant CDN IP ranges.
 
-The tool uses Internet-wide scan data from [Censys](https://censys.io) to find exposed IPv4 hosts presenting an SSL certificate associated with the target's domain name. API keys are required and can be retrieved from your [Censys account](https://search.censys.io/account/api).
+The tool uses Internet-wide scan data from [Censys](https://censys.io) to find exposed IPv4 hosts presenting an SSL certificate associated with the target's domain name. A Personal Access Token (PAT) is required and can be created in your [Censys Platform account](https://platform.censys.io/account/api).
 
 For more detail about this common misconfiguration and how CloudFlair works, refer to the companion blog post at <https://blog.christophetd.fr/bypassing-cloudflare-using-internet-wide-scan-data/>.
 
@@ -54,13 +54,17 @@ $ python cloudflair.py myvulnerable.site
 
 ## Setup
 
-1. Register an account (free) on <https://search.censys.io/register>
-2. Browse to <https://search.censys.io/account/api>, and set two environment variables with your API ID and API secret
+1. Register an account on <https://platform.censys.io/register>
+2. Create a Personal Access Token (PAT) in your [Censys Platform account](https://platform.censys.io/account/api):
+   - Go to Account Management > Personal Access Tokens
+   - Click "Create New Token"
+   - Copy your token and set it as an environment variable
 
 ```bash
-$ export CENSYS_API_ID=...
-$ export CENSYS_API_SECRET=...
+$ export CENSYS_PAT=your-personal-access-token
 ```
+
+**Note:** Starter and Enterprise users need the API Access role to use the API. Free users have limited access to lookup endpoints only.
 
 3. Clone the repository
 
@@ -93,7 +97,7 @@ python cloudflair.py myvulnerable.site --cloudfront
 ```bash
 $ python cloudflair.py --help
 
-usage: cloudflair.py [-h] [-o OUTPUT_FILE] [--censys-api-id CENSYS_API_ID] [--censys-api-secret CENSYS_API_SECRET] [--cloudfront] domain
+usage: cloudflair.py [-h] [-o OUTPUT_FILE] [--censys-pat CENSYS_PAT] [--cloudfront] domain
 
 positional arguments:
   domain                The domain to scan
@@ -102,10 +106,8 @@ options:
   -h, --help            show this help message and exit
   -o OUTPUT_FILE, --output OUTPUT_FILE
                         A file to output likely origin servers to (default: None)
-  --censys-api-id CENSYS_API_ID
-                        Censys API ID. Can also be defined using the CENSYS_API_ID environment variable (default: None)
-  --censys-api-secret CENSYS_API_SECRET
-                        Censys API secret. Can also be defined using the CENSYS_API_SECRET environment variable (default: None)
+  --censys-pat CENSYS_PAT
+                        Censys Personal Access Token. Can also be defined using the CENSYS_PAT environment variable (default: None)
   --cloudfront          Check Cloudfront instead of CloudFlare. (default: False)
 ```
 
@@ -114,15 +116,14 @@ options:
 A lightweight Docker image of CloudFlair ([`christophetd/cloudflair`](https://hub.docker.com/r/christophetd/cloudflair/)) is provided. A scan can easily be instantiated using the following command.
 
 ```bash
-$ docker run --rm -e CENSYS_API_ID=your-id -e CENSYS_API_SECRET=your-secret christophetd/cloudflair myvulnerable.site
+$ docker run --rm -e CENSYS_PAT=your-personal-access-token christophetd/cloudflair myvulnerable.site
 ```
 
-You can also create a file containing the definition of the environment variables, and use the Docker`--env-file` option.
+You can also create a file containing the definition of the environment variable, and use the Docker`--env-file` option.
 
 ```bash
 $ cat censys.env
-CENSYS_API_ID=your-id
-CENSYS_API_SECRET=your-secret
+CENSYS_PAT=your-personal-access-token
 
 $ docker run --rm --env-file=censys.env christophetd/cloudflair myvulnerable.site
 ```
