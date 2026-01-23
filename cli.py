@@ -32,3 +32,17 @@ parser.add_argument(
     action='store_true',
     default=False
 )
+
+parser.add_argument(
+    '--shodan-api-key',
+    help = 'Shodan API key. Can also be defined using the SHODAN_API_KEY environment variable. If provided, will use Shodan instead of Censys.',
+    dest = 'shodan_api_key'
+)
+
+parser.add_argument(
+    '--search-engine',
+    help = 'Search engine to use: censys or shodan (default: censys)',
+    dest = 'search_engine',
+    choices=['censys', 'shodan'],
+    default='censys'
+)

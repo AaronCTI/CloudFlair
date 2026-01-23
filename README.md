@@ -1,6 +1,6 @@
 # CloudFlair
 
-**Important note: CloudFlair requires a paid Censys account (Starter or Enterprise) with API credits. Free Censys accounts do not have access to the search API endpoints required by this tool. You will need to purchase API credits to use this tool.**
+**Important note: CloudFlair requires a paid Censys account (Starter or Enterprise) with API credits, or a Shodan API key. Free Censys accounts do not have access to the search API endpoints required by this tool. You will need to purchase API credits or use Shodan to use this tool.**
 
 CloudFlair is a tool to find origin servers of websites protected by CloudFlare (or CloudFront) which are publicly exposed and don't appropriately restrict network access to the relevant CDN IP ranges.
 
@@ -96,9 +96,14 @@ pip install -r requirements.txt
 python cloudflair.py myvulnerable.site
 ```
 
-or for CloudFront 
+or for CloudFront
 ```bash
 python cloudflair.py myvulnerable.site --cloudfront
+```
+
+For Shodan instead of Censys:
+```bash
+python cloudflair.py myvulnerable.site --search-engine shodan --shodan-api-key your-api-key
 ```
 
 ## Usage
@@ -106,7 +111,7 @@ python cloudflair.py myvulnerable.site --cloudfront
 ```bash
 $ python cloudflair.py --help
 
-usage: cloudflair.py [-h] [-o OUTPUT_FILE] [--censys-pat CENSYS_PAT] [--censys-org-id CENSYS_ORG_ID] [--cloudfront] domain
+usage: cloudflair.py [-h] [-o OUTPUT_FILE] [--censys-pat CENSYS_PAT] [--censys-org-id CENSYS_ORG_ID] [--shodan-api-key SHODAN_API_KEY] [--search-engine {censys,shodan}] [--cloudfront] domain
 
 positional arguments:
   domain                The domain to scan
@@ -119,6 +124,10 @@ options:
                         Censys Personal Access Token. Can also be defined using the CENSYS_PAT environment variable (default: None)
   --censys-org-id CENSYS_ORG_ID
                         Censys Organization ID (required for Starter/Enterprise accounts). Can also be defined using the CENSYS_ORG_ID environment variable (default: None)
+  --shodan-api-key SHODAN_API_KEY
+                        Shodan API key. Can also be defined using the SHODAN_API_KEY environment variable. If provided, will use Shodan instead of Censys. (default: None)
+  --search-engine {censys,shodan}
+                        Search engine to use: censys or shodan (default: censys)
   --cloudfront          Check Cloudfront instead of CloudFlare. (default: False)
 ```
 
@@ -150,6 +159,48 @@ $ python cloudflair.py myvulnerable.site
 ```
 
 This will show the full API requests and responses to help diagnose issues.
+
+For Shodan debugging:
+
+```bash
+$ export SHODAN_DEBUG=1
+$ python cloudflair.py myvulnerable.site --search-engine shodan --shodan-api-key your-api-key
+```
+
+## Shodan Setup (Alternative to Censys)
+
+CloudFlair also supports using Shodan as the search engine instead of Censys. Shodan provides a simpler API with different pricing and rate limits.
+
+### Option 1: Free Shodan Account
+
+1. Register a free account on <https://account.shodan.io/register>
+2. Verify your email and complete the registration
+3. Get your free API key from <https://account.shodan.io>
+
+**Note:** Free Shodan accounts have rate limits (1 request per second, 1000 results per month) and may not have access to all features.
+
+### Option 2: Paid Shodan Membership
+
+For higher rate limits and more features, consider a paid Shodan membership at <https://account.shodan.io/billing>.
+
+### Configuration
+
+Set your Shodan API key as an environment variable:
+
+```bash
+$ export SHODAN_API_KEY=your-shodan-api-key
+```
+
+Or provide it via command line:
+
+```bash
+$ python cloudflair.py myvulnerable.site --search-engine shodan --shodan-api-key your-api-key
+```
+
+### Shodan vs Censys
+
+- **Shodan**: Simpler API, potentially faster queries, different data coverage
+- **Censys**: More detailed certificate analysis, enterprise features, higher API limits for paid accounts
 
 ## Compatibility
 

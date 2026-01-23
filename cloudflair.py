@@ -5,6 +5,7 @@ import cloudflare_utils, cloudfront_utils
 import os
 import sys
 import censys_search
+import shodan_search
 import requests
 import urllib3
 import difflib
@@ -66,7 +67,7 @@ def filter_cloudfront_ips(ips):
     return [ ip for ip in ips if not cloudfront_utils.is_cloudfront_ip(ip) ]
 
 
-def find_hosts(domain, censys_pat, censys_org_id, use_cloudfront):
+def find_hosts(domain, censys_pat, censys_org_id, shodan_api_key, search_engine, use_cloudfront):
     if not dns_utils.is_valid_domain(domain):
         sys.stderr.write('[-] The domain "%s" looks invalid.\n' % domain)
         exit(1)
@@ -78,36 +79,42 @@ def find_hosts(domain, censys_pat, censys_org_id, use_cloudfront):
 
         print('[*] The target appears to be behind CloudFlare.')
 
-    else: 
+    else:
         if not cloudfront_utils.uses_cloudfront(domain):
             print('[-] The domain "%s" does not seem to be behind CloudFront.' % domain)
             exit(0)
 
         print('[*] The target appears to be behind CloudFront.')
 
-    print('[*] Looking for certificates matching "%s" using Censys' % domain)
-    cert_fingerprints = censys_search.get_certificates(domain, censys_pat, org_id=censys_org_id)
-    cert_fingerprints = list(cert_fingerprints)
-    cert_fingerprints_count = len(cert_fingerprints)
-    print('[*] %d certificates matching "%s" found.' % (cert_fingerprints_count, domain))
+    if search_engine == 'shodan':
+        print('[*] Looking for SSL certificates matching "%s" using Shodan' % domain)
+        hosts = shodan_search.get_certificates(domain, shodan_api_key)
+        print('[*] %d IPv4 hosts with SSL certificates matching "%s" found.' % (len(hosts), domain))
+    else:  # censys
+        print('[*] Looking for certificates matching "%s" using Censys' % domain)
+        cert_fingerprints = censys_search.get_certificates(domain, censys_pat, org_id=censys_org_id)
+        cert_fingerprints = list(cert_fingerprints)
+        cert_fingerprints_count = len(cert_fingerprints)
+        print('[*] %d certificates matching "%s" found.' % (cert_fingerprints_count, domain))
 
-    if cert_fingerprints_count == 0:
-        print('Exiting.')
-        exit(0)
+        if cert_fingerprints_count == 0:
+            print('Exiting.')
+            exit(0)
 
-    chunking = (cert_fingerprints_count > CERT_CHUNK_SIZE)
-    if chunking:
-        print(f'[*] Splitting the list of certificates into chunks of {CERT_CHUNK_SIZE}.')
-
-    print('[*] Looking for IPv4 hosts presenting these certificates...')
-    hosts = set()
-    for i in range(0, cert_fingerprints_count, CERT_CHUNK_SIZE):
+        chunking = (cert_fingerprints_count > CERT_CHUNK_SIZE)
         if chunking:
-            print('[*] Processing chunk %d/%d' % (i/CERT_CHUNK_SIZE + 1, cert_fingerprints_count/CERT_CHUNK_SIZE))
-        hosts.update(censys_search.get_hosts(cert_fingerprints[i:i+CERT_CHUNK_SIZE], censys_pat, org_id=censys_org_id))
+            print(f'[*] Splitting the list of certificates into chunks of {CERT_CHUNK_SIZE}.')
+
+        print('[*] Looking for IPv4 hosts presenting these certificates...')
+        hosts = set()
+        for i in range(0, cert_fingerprints_count, CERT_CHUNK_SIZE):
+            if chunking:
+                print('[*] Processing chunk %d/%d' % (i/CERT_CHUNK_SIZE + 1, cert_fingerprints_count/CERT_CHUNK_SIZE))
+            hosts.update(censys_search.get_hosts(cert_fingerprints[i:i+CERT_CHUNK_SIZE], censys_pat, org_id=censys_org_id))
+
+        print('[*] %d IPv4 hosts presenting a certificate issued to "%s" were found.' % (len(hosts), domain))
 
     hosts = filter_cloudflare_ips(hosts) if not use_cloudfront else filter_cloudfront_ips(hosts)
-    print('[*] %d IPv4 hosts presenting a certificate issued to "%s" were found.' % (len(hosts), domain))
 
     if len(hosts) == 0:
         print('[-] The target is most likely not vulnerable.')
@@ -203,8 +210,8 @@ def find_origins(domain, candidates):
     return origins
 
 
-def main(domain, output_file, censys_pat, censys_org_id, use_cloudfront):
-    hosts = find_hosts(domain, censys_pat, censys_org_id, use_cloudfront)
+def main(domain, output_file, censys_pat, censys_org_id, shodan_api_key, search_engine, use_cloudfront):
+    hosts = find_hosts(domain, censys_pat, censys_org_id, shodan_api_key, search_engine, use_cloudfront)
     print_hosts(hosts)
     origins = find_origins(domain, hosts)
 
@@ -222,6 +229,8 @@ if __name__ == "__main__":
 
     censys_pat = None
     censys_org_id = None
+    shodan_api_key = None
+    search_engine = args.search_engine
 
     if 'CENSYS_PAT' in os.environ:
         censys_pat = os.environ['CENSYS_PAT']
@@ -229,19 +238,32 @@ if __name__ == "__main__":
     if 'CENSYS_ORG_ID' in os.environ:
         censys_org_id = os.environ['CENSYS_ORG_ID']
 
+    if 'SHODAN_API_KEY' in os.environ:
+        shodan_api_key = os.environ['SHODAN_API_KEY']
+
     if args.censys_pat:
         censys_pat = args.censys_pat
 
     if args.censys_org_id:
         censys_org_id = args.censys_org_id
 
-    if censys_pat is None:
-        sys.stderr.write('[!] Please set your Censys Personal Access Token from your environment (CENSYS_PAT) or from the command line (--censys-pat).\n')
-        exit(1)
+    if args.shodan_api_key:
+        shodan_api_key = args.shodan_api_key
 
-    if censys_org_id is None:
-        sys.stderr.write('[!] Please set your Censys Organization ID from your environment (CENSYS_ORG_ID) or from the command line (--censys-org-id).\n')
-        sys.stderr.write('[!] Find your Organization ID at https://platform.censys.io - it appears in the URL after "org=".\n')
-        exit(1)
-    
-    main(args.domain, args.output_file, censys_pat, censys_org_id, args.use_cloudfront)
+    # Validate API keys based on search engine
+    if search_engine == 'censys':
+        if censys_pat is None:
+            sys.stderr.write('[!] Please set your Censys Personal Access Token from your environment (CENSYS_PAT) or from the command line (--censys-pat).\n')
+            exit(1)
+
+        if censys_org_id is None:
+            sys.stderr.write('[!] Please set your Censys Organization ID from your environment (CENSYS_ORG_ID) or from the command line (--censys-org-id).\n')
+            sys.stderr.write('[!] Find your Organization ID at https://platform.censys.io - it appears in the URL after "org=".\n')
+            exit(1)
+    elif search_engine == 'shodan':
+        if shodan_api_key is None:
+            sys.stderr.write('[!] Please set your Shodan API key from your environment (SHODAN_API_KEY) or from the command line (--shodan-api-key).\n')
+            sys.stderr.write('[!] Get your API key from https://account.shodan.io\n')
+            exit(1)
+
+    main(args.domain, args.output_file, censys_pat, censys_org_id, shodan_api_key, search_engine, args.use_cloudfront)
