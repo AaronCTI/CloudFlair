@@ -7,7 +7,7 @@ import sys
 import censys_search
 import requests
 import urllib3
-from html_similarity import similarity
+import difflib
 import cli
 import random
 
@@ -19,6 +19,31 @@ config = {
 }
 
 CERT_CHUNK_SIZE = 25
+
+
+def calculate_similarity(text1, text2):
+    """
+    Calculate structural similarity between two HTML strings using difflib.
+
+    Args:
+        text1: First HTML string to compare
+        text2: Second HTML string to compare
+
+    Returns:
+        Float between 0.0 and 1.0 indicating similarity (1.0 = identical)
+    """
+    try:
+        # Split texts into lines for comparison
+        lines1 = text1.splitlines()
+        lines2 = text2.splitlines()
+
+        # Use SequenceMatcher for similarity calculation
+        matcher = difflib.SequenceMatcher(None, lines1, lines2)
+        similarity_ratio = matcher.ratio()
+
+        return similarity_ratio
+    except:
+        return 0.0
 
 
 # Returns a legitimate looking user-agent
@@ -168,7 +193,7 @@ def find_origins(domain, candidates):
 
         if len(response.text) > 0:
             try:
-                page_similarity = similarity(response.text, original_response.text)
+                page_similarity = calculate_similarity(response.text, original_response.text)
             except:
                 page_similarity = 0
 

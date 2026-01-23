@@ -153,4 +153,4 @@ This will show the full API requests and responses to help diagnose issues.
 
 ## Compatibility
 
-Tested on Python 3.6. Feel free to [open an issue](https://github.com/christophetd/cloudflair/issues/new) if you have bug reports or questions.
+Tested on Python 3.6+. Uses only standard library dependencies (no external packages for HTML similarity). Feel free to [open an issue](https://github.com/christophetd/cloudflair/issues/new) if you have bug reports or questions.
