@@ -1,6 +1,6 @@
 # CloudFlair
 
-**Important note: CloudFlair requires a paid Censys account (Starter or Enterprise) with API credits. Free Censys accounts do not have access to the search API endpoints required by this tool.**
+**Important note: CloudFlair requires a paid Censys account (Starter or Enterprise) with API credits. Free Censys accounts do not have access to the search API endpoints required by this tool. You will need to purchase API credits to use this tool.**
 
 CloudFlair is a tool to find origin servers of websites protected by CloudFlare (or CloudFront) which are publicly exposed and don't appropriately restrict network access to the relevant CDN IP ranges.
 
